@@ -14,7 +14,7 @@ struct Options {
 }
 
 
-fn start(path: &Path, options : &Options) -> bool {
+fn start(path: &Path, options: &Options) -> bool {
   if path.to_str().len() == 0 || options.display_help {
     return display_usage();
   }
@@ -24,7 +24,7 @@ fn start(path: &Path, options : &Options) -> bool {
     return false;
   }
 
-  let content : ~[u8] = io::read_whole_file(path).get();
+  let content: ~[u8] = io::read_whole_file(path).get();
 
   if (options.parser_only) {
     return parse_and_print(content);
@@ -41,7 +41,7 @@ fn display_usage() -> bool {
 }
 
 
-fn parse_and_print(source : ~[u8]) -> bool {
+fn parse_and_print(source: ~[u8]) -> bool {
   let ast = beam::parse(source);
   ast.print();
   return true;
