@@ -12,23 +12,26 @@ enum ChunkKind {
   Trace
 }
 
+type Atom = ~str;
+
 enum ChunkBody {
+  AtomBody(~[Atom]),
   Raw(~[u8])
 }
 
 struct Chunk {
   kind: ChunkKind,
   size: uint,
-  body: ChunkBody
+  body: ~ChunkBody
 }
 
 struct Ast {
-  chunks: ~[Chunk]
+  chunks: ~[~Chunk]
 }
 
 impl Ast {
-  pub fn print(&self) {
-    io::println("I'm AST");
+  pub fn to_str(&self) -> ~str {
+    return fmt!("%?", self.chunks);
   }
 }
 
@@ -116,21 +119,39 @@ impl Parser {
     fail!(~"Failed to parse chunk kind");
   }
 
-  fn parse_chunk(kind: ChunkKind, size: uint, body: ~[u8]) -> ~Chunk {
+  fn parse_atom_chunk(&mut self) -> ~ChunkBody {
+    self.ensure(4);
+    let num_atoms = self.read_u32(0);
+    self.offset += 4;
+
+    let mut i = 0;
+    let mut atoms: ~[Atom] = ~[];
+    while i < num_atoms {
+      self.ensure(1);
+      let atom_size: uint = self.get(0) as uint;
+      self.offset += 1;
+      self.ensure(atom_size);
+      let atom = self.slice(atom_size);
+      atoms.push(str::from_bytes(atom));
+      i += 1;
+    }
+    return ~AtomBody(atoms);
+  }
+
+  fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
     return ~Chunk {
       kind: kind,
       size: size,
       body: match (kind) {
-        Atom => {
-          Raw(body)
-        },
-        _ => Raw(body)
+        Atom => self.parse_atom_chunk(),
+        _ => ~Raw(self.slice(size))
       }
     }
   }
 
-  fn run(&mut self) {
+  fn run(&mut self) -> ~Ast {
     // Parse header
+    self.ensure(12);
     self.match4(~"FOR1");
     let form_len = self.read_u32(0);
     self.offset += 4;
@@ -140,14 +161,14 @@ impl Parser {
     // Parse chunks
     let mut chunks : ~[~Chunk] = ~[];
     while self.remaining() > 0 {
-      self.ensure(4);
+      self.ensure(8);
       let kind = self.parse_chunk_kind();
       let size = self.read_u32(0) as uint;
       self.offset += 4;
 
       // Parse particular chunk
-      let chunk = Parser::parse_chunk(kind, size, self.slice(size));
-      vec::push(&mut chunks, chunk);
+      let chunk = self.parse_chunk(kind, size);
+      chunks.push(chunk);
 
       // Account padding
       let m = self.offset % 4;
@@ -155,7 +176,10 @@ impl Parser {
         self.offset += 4 - m;
       }
     }
-    io::println(fmt!("%?", chunks));
+
+    return ~Ast {
+      chunks: chunks
+    };
   }
 }
 
@@ -164,8 +188,5 @@ pub fn parse(source: ~[u8]) -> ~Ast {
     source: source,
     offset: 0
   };
-  p.run();
-  return ~Ast {
-    chunks: ~[]
-  };
+  return p.run();
 }

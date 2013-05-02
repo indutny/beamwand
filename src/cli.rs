@@ -43,7 +43,7 @@ fn display_usage() -> bool {
 
 fn parse_and_print(source: ~[u8]) -> bool {
   let ast = beam::parse(source);
-  ast.print();
+  io::println(ast.to_str());
   return true;
 }
 
