@@ -4,6 +4,8 @@ enum ChunkKind {
   Import,
   Code,
   String,
+  Literal,
+  Function,
   Attr,
   CInfo,
   Local,
@@ -16,7 +18,8 @@ type Atom = ~str;
 
 enum ChunkBody {
   AtomBody(~[Atom]),
-  Raw(~[u8])
+  Raw(~[u8]),
+  Empty
 }
 
 struct Chunk {
@@ -103,20 +106,24 @@ impl Parser {
       return Code;
     } else if self.try_match4("StrT") {
       return String;
+    } else if self.try_match4("LitT") {
+      return Literal;
+    } else if self.try_match4("FunT") {
+      return Function;
     } else if self.try_match4("Attr") {
       return Attr;
     } else if self.try_match4("CInf") {
       return CInfo;
     } else if self.try_match4("LocT") {
-      return Local
+      return Local;
     } else if self.try_match4("Abst") {
-      return Abst
+      return Abst;
     } else if self.try_match4("Line") {
-      return Line
+      return Line;
     } else if self.try_match4("Trac") {
-      return Trace
+      return Trace;
     }
-    fail!(~"Failed to parse chunk kind");
+    fail!(fmt!("Failed to parse chunk kind: %?", str::from_bytes(self.slice(4))));
   }
 
   fn parse_atom_chunk(&mut self) -> ~ChunkBody {
@@ -142,9 +149,12 @@ impl Parser {
     return ~Chunk {
       kind: kind,
       size: size,
-      body: match (kind) {
-        Atom => self.parse_atom_chunk(),
-        _ => ~Raw(self.slice(size))
+      body: match (size) {
+        0 => ~Empty,
+        _ => match (kind) {
+          Atom => self.parse_atom_chunk(),
+          _ => ~Raw(self.slice(size))
+        }
       }
     }
   }
