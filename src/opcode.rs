@@ -1,3 +1,4 @@
+#[deriving(Eq)]
 pub enum Opcode {
   Label = 1,
   Func_info = 2,

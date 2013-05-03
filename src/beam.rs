@@ -32,6 +32,7 @@ struct Export {
   label: u32
 }
 
+#[deriving(Eq)]
 enum ArgTag {
   U = 0,
   I = 1,
@@ -378,8 +379,9 @@ impl Parser {
 
     assert!(self.offset <= end);
     let mut labels: ~LabelMap = ~LinearMap::new();
+    let mut label_id: uint = 1;
     let mut label: ~[~Opcode] = ~[];
-    while (self.offset <= end) {
+    while (self.offset < end) {
       let raw_opcode = self.read_u8();
       if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u8 {
         fail!(fmt!("Unknown opcode met: %?", raw_opcode));
@@ -395,11 +397,34 @@ impl Parser {
         i += 1;
       }
 
-      io::println(fmt!("Opcode: %? %?", opcode, args));
-      label.push(~Opcode {
-        opcode: opcode,
-        args: args
-      });
+      if opcode == opcode::Label {
+        let first = copy args[0];
+        assert!(args.len() == 1 && first.tag == U);
+        let new_id = match first.value {
+          IntVal(id) => id,
+          _ => fail!(fmt!("Unexpected level id: %?", first.value))
+        } as uint;
+
+        // If label has moved
+        if new_id != label_id {
+          let no_overwrite = labels.insert(label_id, label);
+          assert!(no_overwrite);
+
+          label = ~[];
+          label_id = new_id;
+        }
+      } else {
+        label.push(~Opcode {
+          opcode: opcode,
+          args: args
+        });
+      }
+    }
+
+    // Insert trailing code
+    if (label.len() != 0) {
+      let no_overwrite = labels.insert(label_id, label);
+      assert!(no_overwrite);
     }
 
     return ~CodeChunk(labels);
