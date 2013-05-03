@@ -3,8 +3,6 @@
 #[license = "BSD"];
 #[author = "Fedor Indutny"];
 
-extern mod core;
-
 mod beam;
 
 struct Options {
@@ -12,7 +10,6 @@ struct Options {
   parser_only: bool,
   path: ~Path
 }
-
 
 fn start(path: &Path, options: &Options) -> bool {
   if path.to_str().len() == 0 || options.display_help {
@@ -33,20 +30,17 @@ fn start(path: &Path, options: &Options) -> bool {
   }
 }
 
-
 fn display_usage() -> bool {
   io::stdout().write_line("Usage: beamwand <scriptname>.beam");
   io::stdout().write_line("");
   return true;
 }
 
-
 fn parse_and_print(source: ~[u8]) -> bool {
   let ast = beam::parse(source);
   io::println(ast.to_str());
   return true;
 }
-
 
 fn main() {
   let args = os::args();

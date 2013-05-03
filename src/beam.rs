@@ -1,3 +1,5 @@
+use core::hashmap::linear::{LinearMap};
+
 mod opcode;
 
 enum ChunkKind {
@@ -30,19 +32,35 @@ struct Export {
   label: u32
 }
 
-struct OpcodeArg;
+enum OpcodeArgKind {
+  U = 0,
+  I = 1,
+  A = 2,
+  X = 3,
+  Y = 4,
+  F = 5,
+  H = 6,
+  Z = 7
+}
+
+struct OpcodeArg {
+  kind: OpcodeArgKind,
+  value: uint
+}
 
 struct Opcode {
   opcode: opcode::Opcode,
   args: ~[~OpcodeArg]
 }
 
+type LabelMap = LinearMap<uint, ~[~Opcode]>;
+
 enum ChunkBody {
   Raw(~[u8]),
-  AtomChunk(~[Atom]),
+  AtomChunk(~LinearMap<uint, Atom>),
   ImportChunk(~[~Import]),
   ExportChunk(~[~Export]),
-  CodeChunk(~[~Opcode]),
+  CodeChunk(~LabelMap),
   Empty
 }
 
@@ -162,14 +180,14 @@ impl Parser {
   fn parse_atom_chunk(&mut self) -> ~ChunkBody {
     let atom_count = self.read_u32();
 
-    let mut i = 0;
-    let mut atoms: ~[Atom] = ~[];
-    while i < atom_count {
+    let mut i = 1;
+    let mut atoms: ~LinearMap<uint, Atom> = ~LinearMap::new();
+    while i <= atom_count {
       self.ensure(1);
       let atom_size: uint = self.read_u8() as uint;
       self.ensure(atom_size);
       let atom = self.slice(atom_size);
-      atoms.push(str::from_bytes(atom));
+      atoms.insert(i as uint, str::from_bytes(atom));
       i += 1;
     }
     return ~AtomChunk(atoms);
@@ -209,6 +227,10 @@ impl Parser {
     return ~ExportChunk(list);
   }
 
+  fn parse_opcode_arg(&mut self) -> ~OpcodeArg {
+    fail!(~"Not implemented yet");
+  }
+
   fn parse_code_chunk(&mut self, size: uint) -> ~ChunkBody {
     let end = self.offset + size;
 
@@ -220,6 +242,8 @@ impl Parser {
     assert!(highest_opcode <= opcode::MaxOpcode as u32);
 
     assert!(self.offset <= end);
+    let mut labels: ~LabelMap = ~LinearMap::new();
+    let mut label: ~[~Opcode] = ~[];
     while (self.offset <= end) {
       let raw_opcode = self.read_u32();
       if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u32 {
@@ -229,9 +253,21 @@ impl Parser {
       let opcode: opcode::Opcode = unsafe { cast::transmute(raw_opcode as uint) };
       let arity = opcode::get_arity(opcode);
       io::println(fmt!("%? %?", opcode, arity));
+
+      let mut args: ~[~OpcodeArg] = ~[];
+      let mut i: uint = 0;
+      while i < arity {
+        args.push(self.parse_opcode_arg());
+        i += 1;
+      }
+
+      label.push(~Opcode {
+        opcode: opcode,
+        args: args
+      });
     }
 
-    return ~CodeChunk(~[]);
+    return ~CodeChunk(labels);
   }
 
   fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
@@ -260,7 +296,7 @@ impl Parser {
     self.match4(~"BEAM");
 
     // Parse chunks
-    let mut chunks : ~[~Chunk] = ~[];
+    let mut chunks: ~[~Chunk] = ~[];
     while self.remaining() > 0 {
       let kind = self.parse_chunk_kind();
       let size = self.read_u32() as uint;
