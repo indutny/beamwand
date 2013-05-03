@@ -1,3 +1,5 @@
+mod opcode;
+
 enum ChunkKind {
   Atom,
   Export,
@@ -16,9 +18,31 @@ enum ChunkKind {
 
 type Atom = ~str;
 
+struct Import {
+  module: u32,
+  name: u32,
+  arity: u32
+}
+
+struct Export {
+  name: u32,
+  arity: u32,
+  label: u32
+}
+
+struct OpcodeArg;
+
+struct Opcode {
+  opcode: opcode::Opcode,
+  args: ~[~OpcodeArg]
+}
+
 enum ChunkBody {
-  AtomBody(~[Atom]),
   Raw(~[u8]),
+  AtomChunk(~[Atom]),
+  ImportChunk(~[~Import]),
+  ExportChunk(~[~Export]),
+  CodeChunk(~[~Opcode]),
   Empty
 }
 
@@ -79,13 +103,22 @@ impl Parser {
     }
   }
 
-  fn read_u16(&self, off: uint) -> u16 {
-    self.ensure(off + 2);
-    return (self.get(off) as u16 << 8) | (self.get(off + 1) as u16);
+  fn read_u8(&mut self) -> u8 {
+    self.ensure(1);
+    let r = self.get(0);
+    self.offset += 1;
+    return r;
   }
 
-  fn read_u32(&self, off: uint) -> u32 {
-    return (self.read_u16(off) as u32 << 16) | (self.read_u16(off + 2) as u32);
+  fn read_u16(&mut self) -> u16 {
+    self.ensure(2);
+    let r = (self.get(0) as u16 << 8) | (self.get(1) as u16);
+    self.offset += 2;
+    return r;
+  }
+
+  fn read_u32(&mut self) -> u32 {
+    return (self.read_u16() as u32 << 16) | (self.read_u16() as u32);
   }
 
   fn slice(&mut self, size: uint) -> ~[u8] {
@@ -127,32 +160,92 @@ impl Parser {
   }
 
   fn parse_atom_chunk(&mut self) -> ~ChunkBody {
-    self.ensure(4);
-    let num_atoms = self.read_u32(0);
-    self.offset += 4;
+    let atom_count = self.read_u32();
 
     let mut i = 0;
     let mut atoms: ~[Atom] = ~[];
-    while i < num_atoms {
+    while i < atom_count {
       self.ensure(1);
-      let atom_size: uint = self.get(0) as uint;
-      self.offset += 1;
+      let atom_size: uint = self.read_u8() as uint;
       self.ensure(atom_size);
       let atom = self.slice(atom_size);
       atoms.push(str::from_bytes(atom));
       i += 1;
     }
-    return ~AtomBody(atoms);
+    return ~AtomChunk(atoms);
+  }
+
+  fn parse_import_chunk(&mut self) -> ~ChunkBody {
+    let count = self.read_u32();
+
+    let mut i = 0;
+    let mut list: ~[~Import] = ~[];
+    while i < count {
+      list.push(~Import {
+        module: self.read_u32(),
+        name: self.read_u32(),
+        arity: self.read_u32()
+      });
+      i += 1;
+    }
+
+    return ~ImportChunk(list);
+  }
+
+  fn parse_export_chunk(&mut self) -> ~ChunkBody {
+    let count = self.read_u32();
+
+    let mut i = 0;
+    let mut list: ~[~Export] = ~[];
+    while i < count {
+      list.push(~Export {
+        name: self.read_u32(),
+        arity: self.read_u32(),
+        label: self.read_u32()
+      });
+      i += 1;
+    }
+
+    return ~ExportChunk(list);
+  }
+
+  fn parse_code_chunk(&mut self, size: uint) -> ~ChunkBody {
+    let end = self.offset + size;
+
+    let magic_num = self.read_u32();
+    let format_number = self.read_u32();
+    let highest_opcode = self.read_u32();
+    assert!(magic_num == 16u32);
+    assert!(format_number == 0u32);
+    assert!(highest_opcode <= opcode::MaxOpcode as u32);
+
+    assert!(self.offset <= end);
+    while (self.offset <= end) {
+      let raw_opcode = self.read_u32();
+      if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u32 {
+        fail!(fmt!("Unknown opcode met: %?", raw_opcode));
+      }
+
+      let opcode: opcode::Opcode = unsafe { cast::transmute(raw_opcode as uint) };
+      let arity = opcode::get_arity(opcode);
+      io::println(fmt!("%? %?", opcode, arity));
+    }
+
+    return ~CodeChunk(~[]);
   }
 
   fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
     return ~Chunk {
       kind: kind,
       size: size,
-      body: match (size) {
+      body: match size {
         0 => ~Empty,
-        _ => match (kind) {
+        _ => match kind {
           Atom => self.parse_atom_chunk(),
+          Import => self.parse_import_chunk(),
+          Export => self.parse_export_chunk(),
+          Local => self.parse_export_chunk(),
+          Code => self.parse_code_chunk(size),
           _ => ~Raw(self.slice(size))
         }
       }
@@ -161,20 +254,16 @@ impl Parser {
 
   fn run(&mut self) -> ~Ast {
     // Parse header
-    self.ensure(12);
     self.match4(~"FOR1");
-    let form_len = self.read_u32(0);
-    self.offset += 4;
+    let form_len = self.read_u32();
     assert!(form_len <= self.remaining() as u32);
     self.match4(~"BEAM");
 
     // Parse chunks
     let mut chunks : ~[~Chunk] = ~[];
     while self.remaining() > 0 {
-      self.ensure(8);
       let kind = self.parse_chunk_kind();
-      let size = self.read_u32(0) as uint;
-      self.offset += 4;
+      let size = self.read_u32() as uint;
 
       // Parse particular chunk
       let chunk = self.parse_chunk(kind, size);
