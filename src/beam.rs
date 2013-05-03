@@ -44,7 +44,8 @@ enum ArgTag {
   Z = 7,
   Float,
   List,
-  Fr
+  Fr,
+  Lit
 }
 
 enum ArgValue {
@@ -346,7 +347,7 @@ impl Parser {
         3 => ~Arg { tag: U, value: AllocList(self.parse_opcode_arg_alloc()) },
 
         // Literal
-        _ => ~Arg { tag: U, value: IntVal(self.parse_opcode_arg_i64(first)) }
+        _ => ~Arg { tag: Lit, value: IntVal(self.parse_opcode_arg_i64(first)) }
       },
       _ => ~Arg {
         tag: tag,
