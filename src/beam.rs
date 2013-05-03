@@ -32,7 +32,7 @@ struct Export {
   label: u32
 }
 
-enum OpcodeArgKind {
+enum ArgTag {
   U = 0,
   I = 1,
   A = 2,
@@ -40,17 +40,37 @@ enum OpcodeArgKind {
   Y = 4,
   F = 5,
   H = 6,
-  Z = 7
+  Z = 7,
+  Float,
+  List,
+  Fr
 }
 
-struct OpcodeArg {
-  kind: OpcodeArgKind,
-  value: uint
+enum ArgValue {
+  IntVal(i64),
+  FloatVal(f64),
+  AllocList(~[~AllocListItem])
+}
+
+enum AllocKind {
+  WordAlloc,
+  FloatAlloc,
+  LiteralAlloc
+}
+
+struct AllocListItem {
+  kind: AllocKind,
+  value: i64
+}
+
+struct Arg {
+  tag: ArgTag,
+  value: ArgValue
 }
 
 struct Opcode {
   opcode: opcode::Opcode,
-  args: ~[~OpcodeArg]
+  args: ~[~Arg]
 }
 
 type LabelMap = LinearMap<uint, ~[~Opcode]>;
@@ -137,6 +157,10 @@ impl Parser {
 
   fn read_u32(&mut self) -> u32 {
     return (self.read_u16() as u32 << 16) | (self.read_u16() as u32);
+  }
+
+  fn read_i64(&mut self) -> i64 {
+    return (self.read_u32() as i64 << 32) | (self.read_u32() as i64);
   }
 
   fn slice(&mut self, size: uint) -> ~[u8] {
@@ -227,8 +251,115 @@ impl Parser {
     return ~ExportChunk(list);
   }
 
-  fn parse_opcode_arg(&mut self) -> ~OpcodeArg {
-    fail!(~"Not implemented yet");
+  fn parse_opcode_arg_i64(&mut self, first: u8) -> i64 {
+    if first & 0x8 == 0 {
+      // value < 16 (3 bits only)
+      return (first >> 4) as i64;
+    } else if first & 0x10 == 0 {
+      // value <= 2048, occupies 11 bits (3 bits in first byte and whole next byte)
+      let next = self.read_u8();
+      return ((first & 0xe0) as i64 << 3) | next as i64;
+    } else {
+      let len = match first >> 5 {
+        // Length in the next byte
+        7 => {
+          let next = self.read_u8();
+          self.parse_opcode_arg_i64(next)
+        },
+
+        // Small-length integer
+        _ => (first >> 5) as i64 + 2
+      };
+
+      // TODO: support big numbers
+      assert!(len <= sys::size_of::<i64>() as i64);
+      let mut i = 0;
+      let mut res: i64 = 0;
+      let mut sign = false;
+      while i < len {
+        let byte = self.read_u8() as i64;
+
+        // Most significant bit is non-zero - change sign
+        if len != 4 && i == 0 && (byte & 0xf0 != 0) {
+          sign = true;
+          res = (res << 8) + (byte & 0x7f);
+        } else {
+          res = (res << 8) + byte;
+        }
+
+        i += 1;
+      }
+
+      if sign {
+        res = -res;
+      }
+
+      return res;
+    }
+  }
+
+  fn parse_opcode_arg_alloc(&mut self) -> ~[~AllocListItem] {
+    // Read number of allocs
+    let count = self.parse_opcode_int_arg();
+
+    let mut list: ~[~AllocListItem] = ~[];
+    let mut i = 0;
+    while i < count {
+      let kind = self.parse_opcode_int_arg();
+      let value = self.parse_opcode_int_arg();
+
+      list.push(~AllocListItem {
+        kind: match kind {
+          0 => WordAlloc,
+          1 => FloatAlloc,
+          2 => LiteralAlloc,
+          _ => fail!(fmt!("Unexpected alloc list item kind: %?", kind))
+        },
+        value: value
+      });
+
+      i += 1
+    }
+
+    return list;
+  }
+
+  fn parse_opcode_arg(&mut self) -> ~Arg {
+    let first = self.read_u8();
+    let tag: ArgTag  = unsafe { cast::transmute((first & 0x7) as uint) };
+    return match tag {
+      Z => match first >> 4 {
+        // Float
+        0 => ~Arg {
+          tag: Float,
+          value: FloatVal(unsafe { cast::transmute(self.slice(8)) })
+        },
+
+        // List
+        1 => ~Arg { tag: List, value: IntVal((first >> 4) as i64) },
+
+        // Some stuff?
+        2 => ~Arg { tag: Fr, value: copy self.parse_opcode_arg().value },
+
+        // Allocation list
+        3 => ~Arg { tag: U, value: AllocList(self.parse_opcode_arg_alloc()) },
+
+        // Literal
+        _ => ~Arg { tag: U, value: IntVal(self.parse_opcode_arg_i64(first)) }
+      },
+      _ => ~Arg {
+        tag: tag,
+        value: IntVal(self.parse_opcode_arg_i64(first))
+      },
+    }
+  }
+
+  fn parse_opcode_int_arg(&mut self) -> i64 {
+    let val = copy self.parse_opcode_arg().value;
+    return match val {
+      IntVal(r) => r,
+      _ => fail!(fmt!("Expected int value, got %?", val))
+    }
   }
 
   fn parse_code_chunk(&mut self, size: uint) -> ~ChunkBody {
@@ -237,6 +368,10 @@ impl Parser {
     let magic_num = self.read_u32();
     let format_number = self.read_u32();
     let highest_opcode = self.read_u32();
+
+    // Ignore label and function count
+    self.offset += 8;
+
     assert!(magic_num == 16u32);
     assert!(format_number == 0u32);
     assert!(highest_opcode <= opcode::MaxOpcode as u32);
@@ -245,22 +380,22 @@ impl Parser {
     let mut labels: ~LabelMap = ~LinearMap::new();
     let mut label: ~[~Opcode] = ~[];
     while (self.offset <= end) {
-      let raw_opcode = self.read_u32();
-      if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u32 {
+      let raw_opcode = self.read_u8();
+      if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u8 {
         fail!(fmt!("Unknown opcode met: %?", raw_opcode));
       }
 
       let opcode: opcode::Opcode = unsafe { cast::transmute(raw_opcode as uint) };
       let arity = opcode::get_arity(opcode);
-      io::println(fmt!("%? %?", opcode, arity));
 
-      let mut args: ~[~OpcodeArg] = ~[];
+      let mut args: ~[~Arg] = ~[];
       let mut i: uint = 0;
       while i < arity {
         args.push(self.parse_opcode_arg());
         i += 1;
       }
 
+      io::println(fmt!("Opcode: %? %?", opcode, args));
       label.push(~Opcode {
         opcode: opcode,
         args: args
