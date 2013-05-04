@@ -286,7 +286,7 @@ impl Parser {
       };
 
       // TODO: support big numbers
-      assert!(len <= sys::size_of::<i64>() as i64);
+      assert!(len <= i64::bytes as i64);
       let mut i = 0;
       let mut res: i64 = 0;
       let mut sign = false;
