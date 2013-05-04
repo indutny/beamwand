@@ -1,5 +1,5 @@
 RUSTC ?= rustc
-RUSTFLAGS ?=
+RUSTFLAGS ?= -O
 
 BINARY ?= beamwand
 
@@ -13,7 +13,7 @@ clean:
 	rm -f $(BINARY)
 
 $(BINARY): $(SRC)
-	$(RUSTC) src/cli.rs -o $@
+	$(RUSTC) $(RUSTFLAGS) src/cli.rs -o $@
 
 
 .PHONY: all clean
