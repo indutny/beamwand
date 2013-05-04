@@ -485,7 +485,6 @@ impl Parser {
       res.push(p.slice(size));
       i += 1;
     }
-    io::println(fmt!("%?", count));
 
     return LiteralTable(res);
   }
