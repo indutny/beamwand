@@ -36,12 +36,12 @@ enum ChunkKind {
 
 enum ChunkBody {
   Raw(~[u8]),
-  AtomChunk(~LinearMap<uint, Atom>),
-  ImportChunk(~[Import]),
-  ExportChunk(~[Export]),
-  CodeChunk(~LabelMap),
-  FunChunk(~[FunctionItem]),
-  LiteralChunk(~[~[u8]]),
+  AtomTable(~LinearMap<uint, Atom>),
+  ImportTable(~[Import]),
+  ExportTable(~[Export]),
+  CodeTable(~LabelMap),
+  FunTable(~[FunctionItem]),
+  LiteralTable(~[~[u8]]),
   Empty
 }
 
@@ -228,7 +228,7 @@ impl Parser {
       atoms.insert(i as uint, str::from_bytes(atom));
       i += 1;
     }
-    return AtomChunk(atoms);
+    return AtomTable(atoms);
   }
 
   fn parse_import_chunk(&mut self) -> ChunkBody {
@@ -245,7 +245,7 @@ impl Parser {
       i += 1;
     }
 
-    return ImportChunk(list);
+    return ImportTable(list);
   }
 
   fn parse_export_chunk(&mut self) -> ChunkBody {
@@ -262,7 +262,7 @@ impl Parser {
       i += 1;
     }
 
-    return ExportChunk(list);
+    return ExportTable(list);
   }
 
   fn parse_opcode_arg_i64(&mut self, first: u8) -> i64 {
@@ -440,7 +440,7 @@ impl Parser {
       assert!(no_overwrite);
     }
 
-    return CodeChunk(labels);
+    return CodeTable(labels);
   }
 
   fn parse_fun_chunk(&mut self) -> ChunkBody {
@@ -459,7 +459,7 @@ impl Parser {
       i += 1;
     }
 
-    return FunChunk(res);
+    return FunTable(res);
   }
 
   fn parse_literal_chunk(&mut self, size: uint) -> ChunkBody {
@@ -487,7 +487,7 @@ impl Parser {
     }
     io::println(fmt!("%?", count));
 
-    return LiteralChunk(res);
+    return LiteralTable(res);
   }
 
   fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
