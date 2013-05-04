@@ -2,6 +2,21 @@ use core::hashmap::linear::{LinearMap};
 
 mod opcode;
 
+struct Parser {
+  source: ~[u8],
+  offset: uint
+}
+
+struct Ast {
+  chunks: ~[~Chunk]
+}
+
+struct Chunk {
+  kind: ChunkKind,
+  size: uint,
+  body: ChunkBody
+}
+
 enum ChunkKind {
   Atom,
   Export,
@@ -18,6 +33,16 @@ enum ChunkKind {
   Trace
 }
 
+enum ChunkBody {
+  Raw(~[u8]),
+  AtomChunk(~LinearMap<uint, Atom>),
+  ImportChunk(~[Import]),
+  ExportChunk(~[Export]),
+  CodeChunk(~LabelMap),
+  FunChunk(~[FunctionItem]),
+  Empty
+}
+
 type Atom = ~str;
 
 struct Import {
@@ -30,6 +55,18 @@ struct Export {
   name: u32,
   arity: u32,
   label: u32
+}
+
+type LabelMap = LinearMap<uint, ~[Opcode]>;
+
+struct Opcode {
+  opcode: opcode::Opcode,
+  args: ~[Arg]
+}
+
+struct Arg {
+  tag: ArgTag,
+  value: ArgValue
 }
 
 #[deriving(Eq)]
@@ -51,7 +88,7 @@ enum ArgTag {
 enum ArgValue {
   IntVal(i64),
   FloatVal(f64),
-  AllocList(~[~AllocListItem])
+  AllocList(~[AllocListItem])
 }
 
 enum AllocKind {
@@ -65,46 +102,19 @@ struct AllocListItem {
   value: i64
 }
 
-struct Arg {
-  tag: ArgTag,
-  value: ArgValue
-}
-
-struct Opcode {
-  opcode: opcode::Opcode,
-  args: ~[~Arg]
-}
-
-type LabelMap = LinearMap<uint, ~[~Opcode]>;
-
-enum ChunkBody {
-  Raw(~[u8]),
-  AtomChunk(~LinearMap<uint, Atom>),
-  ImportChunk(~[~Import]),
-  ExportChunk(~[~Export]),
-  CodeChunk(~LabelMap),
-  Empty
-}
-
-struct Chunk {
-  kind: ChunkKind,
-  size: uint,
-  body: ~ChunkBody
-}
-
-struct Ast {
-  chunks: ~[~Chunk]
+struct FunctionItem {
+  fun: u32,
+  atom: u32,
+  label: u32,
+  index: u32,
+  num_free: u32,
+  old_uniq: u32
 }
 
 impl Ast {
   pub fn to_str(&self) -> ~str {
     return fmt!("%?", self.chunks);
   }
-}
-
-struct Parser {
-  source: ~[u8],
-  offset: uint
 }
 
 impl Parser {
@@ -203,7 +213,7 @@ impl Parser {
     fail!(fmt!("Failed to parse chunk kind: %?", str::from_bytes(self.slice(4))));
   }
 
-  fn parse_atom_chunk(&mut self) -> ~ChunkBody {
+  fn parse_atom_chunk(&mut self) -> ChunkBody {
     let atom_count = self.read_u32();
 
     let mut i = 1;
@@ -216,16 +226,16 @@ impl Parser {
       atoms.insert(i as uint, str::from_bytes(atom));
       i += 1;
     }
-    return ~AtomChunk(atoms);
+    return AtomChunk(atoms);
   }
 
-  fn parse_import_chunk(&mut self) -> ~ChunkBody {
+  fn parse_import_chunk(&mut self) -> ChunkBody {
     let count = self.read_u32();
 
     let mut i = 0;
-    let mut list: ~[~Import] = ~[];
+    let mut list: ~[Import] = ~[];
     while i < count {
-      list.push(~Import {
+      list.push(Import {
         module: self.read_u32(),
         name: self.read_u32(),
         arity: self.read_u32()
@@ -233,16 +243,16 @@ impl Parser {
       i += 1;
     }
 
-    return ~ImportChunk(list);
+    return ImportChunk(list);
   }
 
-  fn parse_export_chunk(&mut self) -> ~ChunkBody {
+  fn parse_export_chunk(&mut self) -> ChunkBody {
     let count = self.read_u32();
 
     let mut i = 0;
-    let mut list: ~[~Export] = ~[];
+    let mut list: ~[Export] = ~[];
     while i < count {
-      list.push(~Export {
+      list.push(Export {
         name: self.read_u32(),
         arity: self.read_u32(),
         label: self.read_u32()
@@ -250,7 +260,7 @@ impl Parser {
       i += 1;
     }
 
-    return ~ExportChunk(list);
+    return ExportChunk(list);
   }
 
   fn parse_opcode_arg_i64(&mut self, first: u8) -> i64 {
@@ -300,17 +310,17 @@ impl Parser {
     }
   }
 
-  fn parse_opcode_arg_alloc(&mut self) -> ~[~AllocListItem] {
+  fn parse_opcode_arg_alloc(&mut self) -> ~[AllocListItem] {
     // Read number of allocs
     let count = self.parse_opcode_int_arg();
 
-    let mut list: ~[~AllocListItem] = ~[];
+    let mut list: ~[AllocListItem] = ~[];
     let mut i = 0;
     while i < count {
       let kind = self.parse_opcode_int_arg();
       let value = self.parse_opcode_int_arg();
 
-      list.push(~AllocListItem {
+      list.push(AllocListItem {
         kind: match kind {
           0 => WordAlloc,
           1 => FloatAlloc,
@@ -326,30 +336,30 @@ impl Parser {
     return list;
   }
 
-  fn parse_opcode_arg(&mut self) -> ~Arg {
+  fn parse_opcode_arg(&mut self) -> Arg {
     let first = self.read_u8();
     let tag: ArgTag  = unsafe { cast::transmute((first & 0x7) as uint) };
     return match tag {
       Z => match first >> 4 {
         // Float
-        0 => ~Arg {
+        0 => Arg {
           tag: Float,
           value: FloatVal(unsafe { cast::transmute(self.slice(8)) })
         },
 
         // List
-        1 => ~Arg { tag: List, value: IntVal((first >> 4) as i64) },
+        1 => Arg { tag: List, value: IntVal((first >> 4) as i64) },
 
         // Some stuff?
-        2 => ~Arg { tag: Fr, value: copy self.parse_opcode_arg().value },
+        2 => Arg { tag: Fr, value: copy self.parse_opcode_arg().value },
 
         // Allocation list
-        3 => ~Arg { tag: U, value: AllocList(self.parse_opcode_arg_alloc()) },
+        3 => Arg { tag: U, value: AllocList(self.parse_opcode_arg_alloc()) },
 
         // Literal
-        _ => ~Arg { tag: Lit, value: IntVal(self.parse_opcode_arg_i64(first)) }
+        _ => Arg { tag: Lit, value: IntVal(self.parse_opcode_arg_i64(first)) }
       },
-      _ => ~Arg {
+      _ => Arg {
         tag: tag,
         value: IntVal(self.parse_opcode_arg_i64(first))
       },
@@ -364,7 +374,7 @@ impl Parser {
     }
   }
 
-  fn parse_code_chunk(&mut self, size: uint) -> ~ChunkBody {
+  fn parse_code_chunk(&mut self, size: uint) -> ChunkBody {
     let end = self.offset + size;
 
     let magic_num = self.read_u32();
@@ -381,7 +391,7 @@ impl Parser {
     assert!(self.offset <= end);
     let mut labels: ~LabelMap = ~LinearMap::new();
     let mut label_id: uint = 1;
-    let mut label: ~[~Opcode] = ~[];
+    let mut label: ~[Opcode] = ~[];
     while (self.offset < end) {
       let raw_opcode = self.read_u8();
       if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u8 {
@@ -391,7 +401,7 @@ impl Parser {
       let opcode: opcode::Opcode = unsafe { cast::transmute(raw_opcode as uint) };
       let arity = opcode::get_arity(opcode);
 
-      let mut args: ~[~Arg] = ~[];
+      let mut args: ~[Arg] = ~[];
       let mut i: uint = 0;
       while i < arity {
         args.push(self.parse_opcode_arg());
@@ -415,7 +425,7 @@ impl Parser {
           label_id = new_id;
         }
       } else {
-        label.push(~Opcode {
+        label.push(Opcode {
           opcode: opcode,
           args: args
         });
@@ -428,7 +438,26 @@ impl Parser {
       assert!(no_overwrite);
     }
 
-    return ~CodeChunk(labels);
+    return CodeChunk(labels);
+  }
+
+  fn parse_fun_chunk(&mut self) -> ChunkBody {
+    let count = self.read_u32();
+    let mut i = 0;
+    let mut res: ~[FunctionItem] = ~[];
+    while i < count {
+      res.push(FunctionItem {
+        fun: self.read_u32(),
+        atom: self.read_u32(),
+        label: self.read_u32(),
+        index: self.read_u32(),
+        num_free: self.read_u32(),
+        old_uniq: self.read_u32()
+      });
+      i += 1;
+    }
+
+    return FunChunk(res);
   }
 
   fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
@@ -436,14 +465,15 @@ impl Parser {
       kind: kind,
       size: size,
       body: match size {
-        0 => ~Empty,
+        0 => Empty,
         _ => match kind {
           Atom => self.parse_atom_chunk(),
           Import => self.parse_import_chunk(),
           Export => self.parse_export_chunk(),
           Local => self.parse_export_chunk(),
           Code => self.parse_code_chunk(size),
-          _ => ~Raw(self.slice(size))
+          Function => self.parse_fun_chunk(),
+          _ => Raw(self.slice(size))
         }
       }
     }
