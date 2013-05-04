@@ -1,4 +1,5 @@
 use core::hashmap::linear::{LinearMap};
+use core::flate;
 
 mod opcode;
 
@@ -40,6 +41,7 @@ enum ChunkBody {
   ExportChunk(~[Export]),
   CodeChunk(~LabelMap),
   FunChunk(~[FunctionItem]),
+  LiteralChunk(~[~[u8]]),
   Empty
 }
 
@@ -392,7 +394,7 @@ impl Parser {
     let mut labels: ~LabelMap = ~LinearMap::new();
     let mut label_id: uint = 1;
     let mut label: ~[Opcode] = ~[];
-    while (self.offset < end) {
+    while self.offset < end {
       let raw_opcode = self.read_u8();
       if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u8 {
         fail!(fmt!("Unknown opcode met: %?", raw_opcode));
@@ -433,7 +435,7 @@ impl Parser {
     }
 
     // Insert trailing code
-    if (label.len() != 0) {
+    if label.len() != 0 {
       let no_overwrite = labels.insert(label_id, label);
       assert!(no_overwrite);
     }
@@ -460,6 +462,34 @@ impl Parser {
     return FunChunk(res);
   }
 
+  fn parse_literal_chunk(&mut self, size: uint) -> ChunkBody {
+    let data_size = self.read_u32() as uint;
+    // Skip zlib header
+    self.offset += 2;
+    let raw = self.slice(size - 6);
+    let data = flate::inflate_bytes(copy raw);
+    assert!(data.len() == data_size);
+
+    // Create reader
+    let mut p = Parser {
+      source: data,
+      offset: 0
+    };
+
+    // Read each literal
+    let mut res: ~[~[u8]] = ~[];
+    let count = p.read_u32();
+    let mut i = 0;
+    while i < count {
+      let size = p.read_u32() as uint;
+      res.push(p.slice(size));
+      i += 1;
+    }
+    io::println(fmt!("%?", count));
+
+    return LiteralChunk(res);
+  }
+
   fn parse_chunk(&mut self, kind: ChunkKind, size: uint) -> ~Chunk {
     return ~Chunk {
       kind: kind,
@@ -472,6 +502,7 @@ impl Parser {
           Export => self.parse_export_chunk(),
           Local => self.parse_export_chunk(),
           Code => self.parse_code_chunk(size),
+          Literal => self.parse_literal_chunk(size),
           Function => self.parse_fun_chunk(),
           _ => Raw(self.slice(size))
         }
@@ -498,7 +529,7 @@ impl Parser {
 
       // Account padding
       let m = self.offset % 4;
-      if (m != 0) {
+      if m != 0 {
         self.offset += 4 - m;
       }
     }
