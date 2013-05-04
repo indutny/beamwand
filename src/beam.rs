@@ -569,7 +569,7 @@ fn test_parse_code_chunk() {
   let len = p.source.len();
   let res = p.parse_code_chunk(len);
   let labels = match res {
-    CodeChunk(r) => r,
+    CodeTable(r) => r,
     _ => fail!(~"Result should have CodeChunk type")
   };
   let label = labels.get(&1);
