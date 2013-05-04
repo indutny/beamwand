@@ -171,8 +171,8 @@ impl Parser {
     return (self.read_u16() as u32 << 16) | (self.read_u16() as u32);
   }
 
-  fn read_i64(&mut self) -> i64 {
-    return (self.read_u32() as i64 << 32) | (self.read_u32() as i64);
+  fn read_u64(&mut self) -> u64 {
+    return (self.read_u32() as u64 << 32) | (self.read_u32() as u64);
   }
 
   fn slice(&mut self, size: uint) -> ~[u8] {
@@ -289,14 +289,14 @@ impl Parser {
       let mut res: i64 = 0;
       let mut sign = false;
       while i < len {
-        let byte = self.read_u8() as i64;
+        let byte = self.read_u8();
 
         // Most significant bit is non-zero - change sign
-        if len != 4 && i == 0 && (byte & 0xf0 != 0) {
+        if len != 4 && i == 0 && (byte & 0x80) != 0 {
           sign = true;
-          res = (res << 8) + (byte & 0x7f);
+          res = (res << 8) + (byte & 0x7f) as i64;
         } else {
-          res = (res << 8) + byte;
+          res = (res << 8) + byte as i64;
         }
 
         i += 1;
@@ -344,7 +344,7 @@ impl Parser {
         // Float
         0 => Arg {
           tag: Float,
-          value: FloatVal(unsafe { cast::transmute(self.slice(8)) })
+          value: FloatVal(unsafe { cast::transmute(self.read_u64()) })
         },
 
         // List
@@ -515,4 +515,52 @@ pub fn parse(source: ~[u8]) -> ~Ast {
     offset: 0
   };
   return p.run();
+}
+
+#[cfg(test)]
+#[test]
+fn test_parse_code_chunk() {
+  let mut p = Parser {
+    source: ~[
+      0, 0, 0, 16, // magic
+      0, 0, 0, 0, // format
+      0, 0, 0, 135, // max instruction
+      0, 0, 0, 0, // label count
+      0, 0, 0, 0, // function count
+      1, 16, // label 1
+      2, // function_info
+      0x10 | 2, // a:1,
+      7, 0x40, 0x2b, 0x2d, 0x91, 0x68, 0x72, 0xb0, 0x21, // z:float 13.589
+      0x18 | 0, 0x12, 0x34 // u:0x1234
+    ],
+    offset: 0
+  };
+
+  let len = p.source.len();
+  let res = p.parse_code_chunk(len);
+  let labels = match res {
+    CodeChunk(r) => r,
+    _ => fail!(~"Result should have CodeChunk type")
+  };
+  let label = labels.get(&1);
+  assert!(label.len() == 1);
+
+  let instr = copy label[0];
+  assert!(instr.opcode == opcode::Func_info);
+  assert!(instr.args.len() == 3);
+  assert!(instr.args[0].tag == A);
+  assert!(instr.args[1].tag == Float);
+  assert!(instr.args[2].tag == U);
+  match instr.args[0].value {
+    IntVal(x) => assert!(x == 1),
+    _ => fail!(~"Non integer value")
+  }
+  match instr.args[1].value {
+    FloatVal(x) => assert!(x == 13.589f64),
+    _ => fail!(~"Non float value")
+  }
+  match instr.args[2].value {
+    IntVal(x) => assert!(x == 0x1234),
+    _ => fail!(~"Non integer value")
+  }
 }
