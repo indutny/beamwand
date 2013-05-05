@@ -219,7 +219,7 @@ impl Parser {
     let atom_count = self.read_u32();
 
     let mut i = 1;
-    let mut atoms: ~LinearMap<uint, Atom> = ~LinearMap::new();
+    let mut atoms = ~LinearMap::new();
     while i <= atom_count {
       self.ensure(1);
       let atom_size: uint = self.read_u8() as uint;
@@ -235,7 +235,7 @@ impl Parser {
     let count = self.read_u32();
 
     let mut i = 0;
-    let mut list: ~[Import] = ~[];
+    let mut list = ~[];
     while i < count {
       list.push(Import {
         module: self.read_u32(),
@@ -252,7 +252,7 @@ impl Parser {
     let count = self.read_u32();
 
     let mut i = 0;
-    let mut list: ~[Export] = ~[];
+    let mut list = ~[];
     while i < count {
       list.push(Export {
         name: self.read_u32(),
@@ -316,7 +316,7 @@ impl Parser {
     // Read number of allocs
     let count = self.parse_opcode_int_arg();
 
-    let mut list: ~[AllocListItem] = ~[];
+    let mut list = ~[];
     let mut i = 0;
     while i < count {
       let kind = self.parse_opcode_int_arg();
@@ -391,9 +391,9 @@ impl Parser {
     assert!(highest_opcode <= opcode::MaxOpcode as u32);
 
     assert!(self.offset <= end);
-    let mut labels: ~LabelMap = ~LinearMap::new();
+    let mut labels = ~LinearMap::new();
     let mut label_id: uint = 1;
-    let mut label: ~[Opcode] = ~[];
+    let mut label = ~[];
     while self.offset < end {
       let raw_opcode = self.read_u8();
       if raw_opcode == 0 || raw_opcode >= opcode::MaxOpcode as u8 {
@@ -446,7 +446,7 @@ impl Parser {
   fn parse_fun_chunk(&mut self) -> ChunkBody {
     let count = self.read_u32();
     let mut i = 0;
-    let mut res: ~[FunctionItem] = ~[];
+    let mut res = ~[];
     while i < count {
       res.push(FunctionItem {
         fun: self.read_u32(),
@@ -517,7 +517,7 @@ impl Parser {
     self.match4(~"BEAM");
 
     // Parse chunks
-    let mut chunks: ~[~Chunk] = ~[];
+    let mut chunks = ~[];
     while self.remaining() > 0 {
       let kind = self.parse_chunk_kind();
       let size = self.read_u32() as uint;
