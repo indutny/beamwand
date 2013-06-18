@@ -1,5 +1,6 @@
-use core::hashmap::linear::{LinearMap};
-use core::flate;
+use extra::smallintmap::{SmallIntMap};
+use extra::flate;
+use std::{vec, str, i64, cast};
 
 mod opcode;
 
@@ -36,7 +37,7 @@ enum ChunkKind {
 
 enum ChunkBody {
   Raw(~[u8]),
-  AtomTable(~LinearMap<uint, Atom>),
+  AtomTable(~SmallIntMap<Atom>),
   ImportTable(~[Import]),
   ExportTable(~[Export]),
   CodeTable(~LabelMap),
@@ -59,7 +60,7 @@ struct Export {
   label: u32
 }
 
-type LabelMap = LinearMap<uint, ~[Opcode]>;
+type LabelMap = SmallIntMap<~[Opcode]>;
 
 struct Opcode {
   opcode: opcode::Opcode,
@@ -212,14 +213,15 @@ impl Parser {
     } else if self.try_match4("Trac") {
       return Trace;
     }
-    fail!(fmt!("Failed to parse chunk kind: %?", str::from_bytes(self.slice(4))));
+    fail!(fmt!("Failed to parse chunk kind: %?",
+               str::from_bytes(self.slice(4))));
   }
 
   fn parse_atom_chunk(&mut self) -> ChunkBody {
     let atom_count = self.read_u32();
 
     let mut i = 1;
-    let mut atoms = ~LinearMap::new();
+    let mut atoms = ~SmallIntMap::new();
     while i <= atom_count {
       self.ensure(1);
       let atom_size: uint = self.read_u8() as uint;
@@ -391,7 +393,7 @@ impl Parser {
     assert!(highest_opcode <= opcode::MaxOpcode as u32);
 
     assert!(self.offset <= end);
-    let mut labels = ~LinearMap::new();
+    let mut labels = ~SmallIntMap::new();
     let mut label_id: uint = 1;
     let mut label = ~[];
     while self.offset < end {
@@ -511,10 +513,10 @@ impl Parser {
 
   fn run(&mut self) -> ~Ast {
     // Parse header
-    self.match4(~"FOR1");
+    self.match4("FOR1");
     let form_len = self.read_u32();
     assert!(form_len <= self.remaining() as u32);
-    self.match4(~"BEAM");
+    self.match4("BEAM");
 
     // Parse chunks
     let mut chunks = ~[];
@@ -570,7 +572,7 @@ fn test_parse_code_chunk() {
   let res = p.parse_code_chunk(len);
   let labels = match res {
     CodeTable(r) => r,
-    _ => fail!(~"Result should have CodeChunk type")
+    _ => fail!("Result should have CodeChunk type")
   };
   let label = labels.get(&1);
   assert!(label.len() == 1);
@@ -583,14 +585,14 @@ fn test_parse_code_chunk() {
   assert!(instr.args[2].tag == U);
   match instr.args[0].value {
     IntVal(x) => assert!(x == 1),
-    _ => fail!(~"Non integer value")
+    _ => fail!("Non integer value")
   }
   match instr.args[1].value {
     FloatVal(x) => assert!(x == 13.589f64),
-    _ => fail!(~"Non float value")
+    _ => fail!("Non float value")
   }
   match instr.args[2].value {
     IntVal(x) => assert!(x == 0x1234),
-    _ => fail!(~"Non integer value")
+    _ => fail!("Non integer value")
   }
 }

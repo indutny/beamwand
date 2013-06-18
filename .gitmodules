@@ -1,0 +1,3 @@
+[submodule "deps/linearscan"]
+	path = deps/linearscan
+	url = git@github.com:indutny/linearscan.rs

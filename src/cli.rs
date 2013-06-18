@@ -3,6 +3,10 @@
 #[license = "BSD"];
 #[author = "Fedor Indutny"];
 
+extern mod extra;
+
+use std::{io, os};
+
 mod beam;
 
 struct Options {
